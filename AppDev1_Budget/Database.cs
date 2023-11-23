@@ -1,0 +1,151 @@
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Text;
+using System.Threading.Tasks;
+using System.Data.SQLite;
+using System.Threading;
+using System.Data.Entity.Infrastructure;
+using System.Runtime.CompilerServices;
+[assembly: InternalsVisibleToAttribute("DatabaseTesting")]
+
+// ===================================================================
+// Very important notes:
+// ... To keep everything working smoothly, you should always
+//     dispose of EVERY SQLiteCommand even if you recycle a 
+//     SQLiteCommand variable later on.
+//     EXAMPLE:
+//            Database.newDatabase(GetSolutionDir() + "\\" + filename);
+//            var cmd = new SQLiteCommand(Database.dbConnection);
+//            cmd.CommandText = "INSERT INTO categoryTypes(Description) VALUES('Whatever')";
+//            cmd.ExecuteNonQuery();
+//            cmd.Dispose();
+//
+// ... also dispose of reader objects
+//
+// ... by default, SQLite does not impose Foreign Key Restraints
+//     so to add these constraints, connect to SQLite something like this:
+//            string cs = $"Data Source=abc.sqlite; Foreign Keys=1";
+//            var con = new SQLiteConnection(cs);
+//
+// ===================================================================
+
+
+namespace Budget
+{
+    internal class Database
+    {
+
+        public static SQLiteConnection dbConnection { get { return _connection; } }
+        private static SQLiteConnection _connection;
+
+        // ===================================================================
+        // create and open a new database
+        // ===================================================================
+
+        /// <summary>
+        /// Creates a new database at the specified file path. Then adds the tables expenses,categories and categoryTypes to the databse.
+        /// </summary>
+        /// <param name="filename">The name of the file you want to create the new database in.</param>
+        /// <exception cref="FileNotFoundException">If file doesn't exist.</exception>
+
+        public static void newDatabase(string filename)
+        {
+            // Open connection to the database:
+            _OpenConnection(filename);
+
+            // Next, create the tables:
+            const string CREATE_TABLES_COMMAND = @"
+                    DROP TABLE IF EXISTS expenses;
+                    DROP TABLE IF EXISTS categories;
+                    DROP TABLE IF EXISTS categoryTypes;
+
+                    CREATE TABLE expenses (
+                        Id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                        Date TEXT NOT NULL,
+                        Description TEXT NOT NULL,
+                        Amount REAL NOT NULL,
+                        CategoryId INTEGER NOT NULL,
+
+                        FOREIGN KEY (CategoryId) REFERENCES categories(Id)
+                    );
+
+                    CREATE TABLE categories (
+                        Id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                        Description TEXT NOT NULL,
+                        TypeId INTEGER NOT NULL,
+
+                        FOREIGN KEY (TypeId) REFERENCES categoryTypes(Id)
+                    );
+
+                    CREATE TABLE categoryTypes (
+                        Id INTEGER PRIMARY KEY NOT NULL,
+                        Description TEXT NOT NULL
+                    );
+                ";
+
+            // Create, execute, and dispose of command for table creation:
+            var createTablesCmd = new SQLiteCommand(dbConnection);
+            createTablesCmd.CommandText = CREATE_TABLES_COMMAND;
+            createTablesCmd.ExecuteNonQuery();
+            createTablesCmd.Dispose();
+        }
+
+       // ===================================================================
+       // open an existing database
+       // ===================================================================
+       /// <summary>
+       /// Opens a connection to the passed filename
+       /// </summary>
+       /// <param name="filename">The name of the db file you want to open</param>
+       /// <exception cref="FileNotFoundException">If file doesn't exist.</exception>
+       public static void existingDatabase(string filename)
+        {
+            // If the file doesn't exist, throw an exception:
+            if (!File.Exists(filename))
+                throw new FileNotFoundException($"File \"{filename}\" does not exist.");
+
+            // Open the database connection
+            _OpenConnection(filename);
+        }
+
+       // ===================================================================
+       // close existing database, wait for garbage collector to
+       // release the lock before continuing
+       // ===================================================================
+        static public void CloseDatabaseAndReleaseFile()
+        {
+            if (Database.dbConnection != null)
+            {
+                // close the database connection
+                Database.dbConnection.Close();
+                
+
+                // wait for the garbage collector to remove the
+                // lock from the database file
+                GC.Collect();
+                GC.WaitForPendingFinalizers();
+            }
+        }
+
+        private static void _OpenConnection(string filename)
+        {
+            // If there was a database open before, close it and release the lock
+            CloseDatabaseAndReleaseFile();
+
+            // Open connection to the database file with foreign keys enabled:
+            string connectionSource = @$"URI=file:{filename}; Foreign Keys=1";
+            _connection = new SQLiteConnection(connectionSource);
+
+            try
+            {
+                _connection.Open();
+            }
+            catch(Exception e)
+            {
+                throw new SQLiteException($"Failed to connect to database: '{filename}'. Error: {e.Message}");
+            }
+        }
+    }
+
+}
